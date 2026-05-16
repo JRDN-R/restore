@@ -36,6 +36,9 @@
       object-fit: contain;
       pointer-events: none;
       display: block;
+      transform-origin: center center;
+      will-change: transform;
+      transition: transform .18s ease;
     }
 
     .comparison .after-wrap {
@@ -142,6 +145,95 @@
       pointer-events: none;
     }
 
+    /* ── Zoom controls ────────────────────────────── */
+    .zoom-controls {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 60;
+      display: grid;
+      gap: 8px;
+      justify-items: end;
+      pointer-events: auto;
+      touch-action: manipulation;
+    }
+
+    .zoom-controls button {
+      border: 0;
+      outline: 0;
+      color: #fff;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 18px rgba(0,0,0,.35);
+      border-radius: 999px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+
+    .zoom-toggle {
+      min-width: 62px;
+      min-height: 40px;
+      padding: 0 14px;
+      letter-spacing: .02em;
+    }
+
+    .zoom-toggle.active {
+      background: rgba(255,255,255,.95);
+      color: #0a0a0a;
+    }
+
+    .zoom-panel {
+      display: none;
+      gap: 8px;
+      justify-items: end;
+    }
+
+    .zoom-panel.open {
+      display: grid;
+    }
+
+    .zoom-row,
+    .pan-grid {
+      display: grid;
+      gap: 6px;
+      padding: 6px;
+      background: rgba(0,0,0,.35);
+      backdrop-filter: blur(8px);
+      border-radius: 18px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.25);
+    }
+
+    .zoom-row {
+      grid-template-columns: repeat(3, 40px);
+    }
+
+    .pan-grid {
+      grid-template-columns: repeat(3, 40px);
+    }
+
+    .zoom-row button,
+    .pan-grid button {
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+      background: rgba(255,255,255,.16);
+    }
+
+    .zoom-row button:active,
+    .pan-grid button:active,
+    .zoom-toggle:active {
+      transform: scale(.96);
+    }
+
+    .pan-spacer {
+      width: 40px;
+      height: 40px;
+    }
+
     @keyframes fadeHint {
       to {
         opacity: 0;
@@ -156,6 +248,7 @@
 
     <!-- BEFORE bottom layer -->
     <img
+      class="zoomable"
       src="https://raw.githubusercontent.com/JRDN-R/restore/main/before.png"
       alt="Before"
       draggable="false"
@@ -164,6 +257,7 @@
     <!-- AFTER top layer, clipped from left -->
     <div class="after-wrap" id="afterWrap">
       <img
+        class="zoomable"
         src="https://raw.githubusercontent.com/JRDN-R/restore/main/after.png"
         alt="After"
         draggable="false"
@@ -189,6 +283,31 @@
 
     <!-- Hint -->
     <div class="hint">← Drag to compare →</div>
+
+    <!-- Zoom controls -->
+    <div class="zoom-controls" id="zoomControls" aria-label="Zoom controls">
+      <button class="zoom-toggle" id="zoomToggle" type="button" aria-pressed="false">Zoom</button>
+
+      <div class="zoom-panel" id="zoomPanel" aria-hidden="true">
+        <div class="zoom-row">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset zoom">1×</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+
+        <div class="pan-grid" aria-label="Pan controls">
+          <span class="pan-spacer"></span>
+          <button type="button" data-pan="up" aria-label="Move up">↑</button>
+          <span class="pan-spacer"></span>
+          <button type="button" data-pan="left" aria-label="Move left">←</button>
+          <button type="button" data-pan="center" aria-label="Center image">•</button>
+          <button type="button" data-pan="right" aria-label="Move right">→</button>
+          <span class="pan-spacer"></span>
+          <button type="button" data-pan="down" aria-label="Move down">↓</button>
+          <span class="pan-spacer"></span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -197,8 +316,16 @@
       const afterWrap = document.getElementById('afterWrap');
       const line = document.getElementById('sliderLine');
       const handle = document.getElementById('sliderHandle');
+      const zoomControls = document.getElementById('zoomControls');
+      const zoomToggle = document.getElementById('zoomToggle');
+      const zoomPanel = document.getElementById('zoomPanel');
+      const zoomableImages = document.querySelectorAll('.zoomable');
 
       let isDragging = false;
+      let zoomMode = false;
+      let zoom = 1;
+      let panX = 0;
+      let panY = 0;
 
       function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
@@ -225,7 +352,81 @@
         return event.clientX;
       }
 
+      function clampPan() {
+        if (zoom <= 1) {
+          panX = 0;
+          panY = 0;
+          return;
+        }
+
+        const maxX = comp.clientWidth * (zoom - 1) / 2;
+        const maxY = comp.clientHeight * (zoom - 1) / 2;
+
+        panX = clamp(panX, -maxX, maxX);
+        panY = clamp(panY, -maxY, maxY);
+      }
+
+      function applyZoom() {
+        clampPan();
+
+        zoomableImages.forEach((img) => {
+          img.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
+        });
+      }
+
+      function setZoomMode(enabled) {
+        zoomMode = enabled;
+        zoomToggle.classList.toggle('active', enabled);
+        zoomToggle.setAttribute('aria-pressed', String(enabled));
+        zoomToggle.textContent = enabled ? 'Exit' : 'Zoom';
+        zoomPanel.classList.toggle('open', enabled);
+        zoomPanel.setAttribute('aria-hidden', String(!enabled));
+
+        if (!enabled) {
+          zoom = 1;
+          panX = 0;
+          panY = 0;
+          applyZoom();
+        }
+      }
+
+      function changeZoom(direction) {
+        if (direction === 'reset') {
+          zoom = 1;
+          panX = 0;
+          panY = 0;
+        } else if (direction === 'in') {
+          zoom = clamp(zoom + .25, 1, 4);
+        } else if (direction === 'out') {
+          zoom = clamp(zoom - .25, 1, 4);
+        }
+
+        applyZoom();
+      }
+
+      function panImage(direction) {
+        const step = 42;
+
+        if (direction === 'center') {
+          panX = 0;
+          panY = 0;
+        }
+
+        if (zoom <= 1) {
+          zoom = 1.25;
+        }
+
+        if (direction === 'left') panX += step;
+        if (direction === 'right') panX -= step;
+        if (direction === 'up') panY += step;
+        if (direction === 'down') panY -= step;
+
+        applyZoom();
+      }
+
       function onStart(event) {
+        if (event.target.closest('.zoom-controls')) return;
+
         event.preventDefault();
         isDragging = true;
         handle.classList.add('dragging');
@@ -244,6 +445,34 @@
         handle.classList.remove('dragging');
       }
 
+      zoomControls.addEventListener('mousedown', (event) => event.stopPropagation());
+      zoomControls.addEventListener('mousemove', (event) => event.stopPropagation());
+      zoomControls.addEventListener('mouseup', (event) => event.stopPropagation());
+      zoomControls.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: false });
+      zoomControls.addEventListener('touchmove', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }, { passive: false });
+      zoomControls.addEventListener('touchend', (event) => event.stopPropagation());
+      zoomControls.addEventListener('click', (event) => event.stopPropagation());
+
+      zoomToggle.addEventListener('click', () => {
+        setZoomMode(!zoomMode);
+      });
+
+      zoomPanel.addEventListener('click', (event) => {
+        const zoomButton = event.target.closest('[data-zoom]');
+        const panButton = event.target.closest('[data-pan]');
+
+        if (zoomButton) {
+          changeZoom(zoomButton.dataset.zoom);
+        }
+
+        if (panButton) {
+          panImage(panButton.dataset.pan);
+        }
+      });
+
       comp.addEventListener('mousedown', onStart);
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onEnd);
@@ -252,6 +481,8 @@
       window.addEventListener('touchmove', onMove, { passive: false });
       window.addEventListener('touchend', onEnd);
       window.addEventListener('touchcancel', onEnd);
+
+      window.addEventListener('resize', applyZoom);
 
       document.addEventListener('keydown', (event) => {
         const rect = comp.getBoundingClientRect();
